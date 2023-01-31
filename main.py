@@ -1,4 +1,6 @@
+import datetime
 import os
+import warnings
 from dataclasses import dataclass
 from time import sleep
 from typing import List
@@ -48,15 +50,26 @@ class Utils:
         p = psutil.Process(pid)
         p.terminate()
 
+    @staticmethod
+    def kill_colvirs() -> None:
+        for proc in psutil.process_iter():
+            try:
+                if 'COLVIR' in proc.name():
+                    process = psutil.Process(proc.pid)
+                    process.terminate()
+            except psutil.AccessDenied:
+                continue
+
 
 class Colvir:
-    def __init__(self, credentials: Credentials, today: str, session: requests.Session) -> None:
+    def __init__(self, credentials: Credentials, tomorrow: str) -> None:
         self.credentials = credentials
         self.pid: int or None = None
         self.app: pywinauto.Application or None = None
-        self.today: str = today
-        self.notifier = TelegramNotifier(session=session)
+        self.tomorrow: str = tomorrow
         self.utils = Utils()
+        self.utils.kill_colvirs()
+        self.is_next_day: bool = False
 
     def login(self):
         desktop = pywinauto.Desktop(backend='win32')
@@ -84,11 +97,12 @@ class Colvir:
                     child.send_keystrokes('{ENTER}')
                     break
 
-    def is_next_day(self) -> bool:
+    def check_is_next_day(self) -> bool:
         with BackendManager(self.app, 'uia'):
             status_win = self.utils.get_window(app=self.app, title='Банковская система.+', regex=True)
             colvir_day = status_win['Static3'].window_text().strip()
-        return self.today != colvir_day
+        print(datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'), self.tomorrow, colvir_day, sep='    ')
+        return self.tomorrow == colvir_day
 
     def run(self):
         try:
@@ -117,8 +131,8 @@ class Colvir:
         except (ElementNotFoundError, MatchError):
             self.retry()
             return
-        if self.is_next_day():
-            self.notifier.send_notification(message=f'!!!!!!!!')
+        self.is_next_day = self.check_is_next_day()
+        self.utils.kill_process(pid=self.pid)
 
     def retry(self) -> None:
         self.utils.kill_process(pid=self.pid)
@@ -126,15 +140,32 @@ class Colvir:
 
 
 def main():
+    warnings.simplefilter(action='ignore', category=UserWarning)
     dotenv.load_dotenv()
 
+    colvir_bot = Colvir(
+        credentials=Credentials(usr=os.getenv('COLVIR_USR'), psw=os.getenv('COLVIR_PSW')),
+        tomorrow='01.02.23',
+    )
+
     with requests.Session() as session:
-        colvir_bot = Colvir(
-            credentials=Credentials(usr=os.getenv('COLVIR_USR'), psw=os.getenv('COLVIR_PSW')),
-            today='31.01.22',
-            session=session
-        )
-        colvir_bot.run()
+        notifier = TelegramNotifier(session=session)
+
+        while True:
+            colvir_bot.run()
+            if colvir_bot.is_next_day:
+                notifier.send_notification(message=f'!!!!!!!!')
+                sleep(60)
+                notifier.send_notification(message=f'!!!!!!!!')
+                sleep(60)
+                notifier.send_notification(message=f'!!!!!!!!')
+                sleep(60)
+                notifier.send_notification(message=f'!!!!!!!!')
+                sleep(60)
+                notifier.send_notification(message=f'!!!!!!!!')
+                break
+            else:
+                sleep(60)
 
 
 if __name__ == '__main__':
