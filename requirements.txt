@@ -1,0 +1,4 @@
+pywinauto
+requests
+psutil
+python-dotenv
